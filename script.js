@@ -4,7 +4,7 @@ function forceSpeak(text, callback = null) {
 
   const speakNow = () => {
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.8; // Snappier delivery
+    utterance.rate = 2.2; // Snappier delivery
     utterance.pitch = 1.0;
     utterance.volume = 1.0;
     utterance.lang = 'en-US';

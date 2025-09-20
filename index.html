@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Blackjack</title>
+    <link rel="icon" href="favicon-32x32.png" type="image/png">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background-color: #0d4f3c;
+            font-family: Arial, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .mic-button {
+            width: 90vw;
+            height: 90vh;
+            max-width: 600px;
+            max-height: 600px;
+            border-radius: 50%;
+            border: 8px solid #ffffff;
+            background: linear-gradient(135deg, #ff6b6b, #ee5a52);
+            color: white;
+            font-size: 3em;
+            font-weight: bold;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+            transition: all 0.3s ease;
+        }
+        
+        .mic-button:active {
+            transform: scale(0.95);
+        }
+        
+        .mic-button.listening {
+            background: linear-gradient(135deg, #4ecdc4, #44a08d);
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { 
+                box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 0 0 rgba(78, 205, 196, 0.7); 
+            }
+            50% { 
+                box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 0 30px rgba(78, 205, 196, 0.3); 
+            }
+            100% { 
+                box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 0 0 rgba(78, 205, 196, 0); 
+            }
+        }
+        
+        @media (max-width: 600px) {
+            .mic-button {
+                font-size: 2em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <button class="mic-button" id="micButton">
+        TAP TO TALK
+    </button>
+
+    <script>
+        class VoiceBlackjackGame {
+            constructor() {
+                this.recognition = null;
+                this.isListening = false;
+                this.currentlySpeaking = false;
+                
+                // Game state
+                this.playerChips = 100;
+                this.currentBet = 0;
+                this.deck = [];
+                this.playerHand = [];
+                this.dealerHand = [];
+                this.gamePhase = 'betting';
+                
+                this.initSpeechRecognition();
+                this.setupEventListeners();
+                this.createAndShuffleDeck();
+                
+                // Force speech to work - try multiple times if needed
+                this.ensureSpeechWorks();
+            }
+            
+            ensureSpeechWorks() {
+                // Samsung Internet specific initialization
+                if (typeof window.speechSynthesis === 'undefined') {
+                    console.log("Speech synthesis not supported in this browser");
+                    return;
+                }
+                
+                // Samsung Internet sometimes needs a longer delay
+                setTimeout(() => {
+                    // Try to load voices first
+                    const voices = window.speechSynthesis.getVoices();
+                    console.log("Available voices:", voices.length);
+                    
+                    this.forceSpeak("Welcome to blackjack. You have 100 chips. Place your bet to begin. Say bet followed by an amount, like bet 10.");
+                }, 1000);
+                
+                // Backup attempt with even longer delay
+                setTimeout(() => {
+                    if (!this.currentlySpeaking) {
+                        this.forceSpeak("Tap the button and say bet 10 to start playing.");
+                    }
+                }, 4000);
+            }
+            
+            forceSpeak(text, callback = null) {
+                console.log("Attempting to speak:", text);
+                
+                if (!text) return;
+                
+                // Check if speech synthesis is available
+                if (typeof window.speechSynthesis === 'undefined') {
+                    console.log("Speech synthesis not available - skipping speech");
+                    this.currentlySpeaking = false;
+                    if (callback) setTimeout(callback, 100);
+                    return;
+                }
+                
+                this.currentlySpeaking = true;
+                
+                // Stop any current speech
+                try {
+                    window.speechSynthesis.cancel();
+                } catch (e) {
+                    console.log("Error cancelling speech:", e);
+                }
+                
+                // Wait a bit then speak
+                setTimeout(() => {
+                    try {
+                        if (typeof SpeechSynthesisUtterance === 'undefined') {
+                            console.log("SpeechSynthesisUtterance not available");
+                            this.currentlySpeaking = false;
+                            if (callback) setTimeout(callback, 100);
+                            return;
+                        }
+                        
+                        const utterance = new SpeechSynthesisUtterance(text);
+                        utterance.rate = 0.7;  // Slightly slower for Samsung Internet
+                        utterance.pitch = 1.0;
+                        utterance.volume = 1.0;
+                        
+                        // Try to get a voice - Samsung Internet specific handling
+                        try {
+                            const voices = window.speechSynthesis.getVoices();
+                            console.log("Voices available:", voices.length);
+                            if (voices.length > 0) {
+                                // Samsung Internet often has good Korean and English voices
+                                let selectedVoice = voices.find(voice => voice.lang.startsWith('en-US')) ||
+                                                  voices.find(voice => voice.lang.startsWith('en')) ||
+                                                  voices.find(voice => voice.default) ||
+                                                  voices[0];
+                                
+                                if (selectedVoice) {
+                                    utterance.voice = selectedVoice;
+                                    console.log("Selected voice:", selectedVoice.name, selectedVoice.lang);
+                                }
+                            }
+                        } catch (e) {
+                            console.log("Error getting voices:", e);
+                        }
+                        
+                        utterance.onstart = () => {
+                            console.log("Speech started:", text);
+                        };
+                        
+                        utterance.onend = () => {
+                            console.log("Speech ended:", text);
+                            this.currentlySpeaking = false;
+                            if (callback) {
+                                setTimeout(callback, 300);
+                            }
+                        };
+                        
+                        utterance.onerror = (event) => {
+                            console.log("Speech error:", event);
+                            this.currentlySpeaking = false;
+                            if (callback) {
+                                setTimeout(callback, 300);
+                            }
+                        };
+                        
+                        window.speechSynthesis.speak(utterance);
+                        console.log("Speech queued successfully");
+                        
+                    } catch (error) {
+                        console.log("Speech failed:", error);
+                        this.currentlySpeaking = false;
+                        if (callback) {
+                            setTimeout(callback, 1000);
+                        }
+                    }
+                }, 100);
+            }
+            
+            speakSequence(messages, callback = null) {
+                if (messages.length === 0) {
+                    if (callback) callback();
+                    return;
+                }
+                
+                const [first, ...rest] = messages;
+                this.forceSpeak(first, () => {
+                    if (rest.length > 0) {
+                        setTimeout(() => {
+                            this.speakSequence(rest, callback);
+                        }, 500);
+                    } else if (callback) {
+                        callback();
+                    }
+                });
+            }
+            
+            initSpeechRecognition() {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                
+                if (!SpeechRecognition) {
+                    console.log("Speech recognition not supported");
+                    return;
+                }
+                
+                this.recognition = new SpeechRecognition();
+                this.recognition.continuous = false;
+                this.recognition.interimResults = false;
+                this.recognition.lang = 'en-US';
+                
+                this.recognition.onstart = () => {
+                    console.log("Recognition started");
+                    this.isListening = true;
+                    this.updateMicButton();
+                };
+                
+                this.recognition.onend = () => {
+                    console.log("Recognition ended");
+                    this.isListening = false;
+                    this.updateMicButton();
+                };
+                
+                this.recognition.onresult = (event) => {
+                    const transcript = event.results[0][0].transcript.toLowerCase().trim();
+                    console.log("Heard:", transcript);
+                    this.isListening = false;
+                    this.updateMicButton();
+                    this.processCommand(transcript);
+                };
+                
+                this.recognition.onerror = (event) => {
+                    console.log("Recognition error:", event.error);
+                    this.isListening = false;
+                    this.updateMicButton();
+                    if (event.error !== 'aborted') {
+                        this.forceSpeak("I didn't catch that. Try again.");
+                    }
+                };
+            }
+            
+            setupEventListeners() {
+                document.getElementById('micButton').addEventListener('click', () => {
+                    console.log("Button clicked. Currently speaking:", this.currentlySpeaking, "Currently listening:", this.isListening);
+                    
+                    if (this.currentlySpeaking) {
+                        // Stop current speech
+                        try {
+                            if (typeof window.speechSynthesis !== 'undefined') {
+                                window.speechSynthesis.cancel();
+                            }
+                            this.currentlySpeaking = false;
+                            console.log("Speech cancelled");
+                        } catch (e) {
+                            console.log("Error cancelling speech:", e);
+                        }
+                        return;
+                    }
+                    
+                    if (this.isListening && this.recognition) {
+                        try {
+                            this.recognition.stop();
+                            console.log("Recognition stopped");
+                        } catch (e) {
+                            console.log("Error stopping recognition:", e);
+                        }
+                    } else if (this.recognition && !this.isListening) {
+                        try {
+                            this.recognition.start();
+                            console.log("Recognition started");
+                        } catch (e) {
+                            console.log("Error starting recognition:", e);
+                            this.isListening = false;
+                            this.updateMicButton();
+                        }
+                    }
+                });
+                
+                // Also listen for voice loading
+                if (typeof window.speechSynthesis !== 'undefined' && window.speechSynthesis.onvoiceschanged !== undefined) {
+                    window.speechSynthesis.onvoiceschanged = () => {
+                        console.log("Voices loaded:", window.speechSynthesis.getVoices().length);
+                    };
+                }
+            }
+            
+            updateMicButton() {
+                const button = document.getElementById('micButton');
+                if (this.isListening) {
+                    button.textContent = 'LISTENING';
+                    button.classList.add('listening');
+                } else {
+                    button.textContent = 'TAP TO TALK';
+                    button.classList.remove('listening');
+                }
+            }
+            
+            processCommand(command) {
+                console.log("Processing command:", command, "Game phase:", this.gamePhase);
+                
+                if (this.gamePhase === 'betting') {
+                    this.processBettingCommand(command);
+                } else if (this.gamePhase === 'playing') {
+                    this.processGameCommand(command);
+                } else if (this.gamePhase === 'finished') {
+                    this.processFinishedCommand(command);
+                }
+            }
+            
+            processBettingCommand(command) {
+                if (command.includes('bet')) {
+                    const betMatch = command.match(/bet\s+(\d+)/);
+                    if (betMatch) {
+                        const betAmount = parseInt(betMatch[1]);
+                        this.placeBet(betAmount);
+                    } else {
+                        this.forceSpeak("Say bet followed by an amount, like bet 10.");
+                    }
+                } else if (command.includes('chips') || command.includes('money') || command.includes('balance')) {
+                    this.forceSpeak(`You have ${this.playerChips} chips.`);
+                } else {
+                    this.forceSpeak("Place your bet to start. Say bet followed by an amount.");
+                }
+            }
+            
+            processGameCommand(command) {
+                if (command.includes('hit me') || command.includes('hit')) {
+                    this.playerHit();
+                } else if (command.includes('stand') || command.includes('stay')) {
+                    this.playerStand();
+                } else if (command.includes('my score') || command.includes('my total') || command.includes('what do i have')) {
+                    this.announcePlayerScore();
+                } else if (command.includes('dealer') && (command.includes('showing') || command.includes('card'))) {
+                    this.announceDealerCard();
+                } else {
+                    this.forceSpeak("Say hit me for another card, or stand to keep your hand.");
+                }
+            }
+            
+            processFinishedCommand(command) {
+                if (command.includes('new') || command.includes('again') || command.includes('play') || command.includes('bet')) {
+                    this.startNewHand();
+                } else if (command.includes('chips') || command.includes('money') || command.includes('balance')) {
+                    this.forceSpeak(`You have ${this.playerChips} chips.`);
+                } else {
+                    this.forceSpeak("Say new game to play again.");
+                }
+            }
+            
+            placeBet(amount) {
+                if (amount > this.playerChips) {
+                    this.forceSpeak(`You only have ${this.playerChips} chips. Bet less.`);
+                    return;
+                }
+                
+                if (amount <= 0) {
+                    this.forceSpeak("Bet must be greater than zero.");
+                    return;
+                }
+                
+                this.currentBet = amount;
+                this.playerChips -= amount;
+                this.gamePhase = 'playing';
+                
+                this.dealInitialCards();
+            }
+            
+            dealInitialCards() {
+                this.playerHand = [this.drawCard(), this.drawCard()];
+                this.dealerHand = [this.drawCard(), this.drawCard()];
+                
+                const playerTotal = this.calculateHandValue(this.playerHand);
+                
+                const messages = [
+                    `Bet ${this.currentBet}. Dealing cards.`,
+                    `You have ${this.cardToString(this.playerHand[0])}.`,
+                    `And ${this.cardToString(this.playerHand[1])}.`,
+                    `Your total is ${playerTotal}.`,
+                    `Dealer shows ${this.cardToString(this.dealerHand[0])}.`
+                ];
+                
+                if (playerTotal === 21) {
+                    messages.push("Blackjack!");
+                    this.speakSequence(messages, () => {
+                        setTimeout(() => this.dealerTurn(), 1000);
+                    });
+                } else {
+                    messages.push("Hit me or stand?");
+                    this.speakSequence(messages);
+                }
+            }
+            
+            playerHit() {
+                const newCard = this.drawCard();
+                this.playerHand.push(newCard);
+                const total = this.calculateHandValue(this.playerHand);
+                
+                const messages = [
+                    `You drew ${this.cardToString(newCard)}.`,
+                    `Your total is ${total}.`
+                ];
+                
+                if (total > 21) {
+                    messages.push("Bust! You lose.");
+                    this.speakSequence(messages, () => {
+                        setTimeout(() => this.endGame(false), 1000);
+                    });
+                } else if (total === 21) {
+                    messages.push("Twenty one! Dealer's turn.");
+                    this.speakSequence(messages, () => {
+                        setTimeout(() => this.dealerTurn(), 1000);
+                    });
+                } else {
+                    messages.push("Hit me or stand?");
+                    this.speakSequence(messages);
+                }
+            }
+            
+            playerStand() {
+                const total = this.calculateHandValue(this.playerHand);
+                this.speakSequence([
+                    `You stand with ${total}.`,
+                    "Dealer's turn."
+                ], () => {
+                    setTimeout(() => this.dealerTurn(), 1000);
+                });
+            }
+            
+            dealerTurn() {
+                this.gamePhase = 'dealer';
+                
+                const dealerCards = this.dealerHand.map(card => this.cardToString(card));
+                const dealerTotal = this.calculateHandValue(this.dealerHand);
+                
+                this.speakSequence([
+                    `Dealer has ${dealerCards[0]}.`,
+                    `And ${dealerCards[1]}.`,
+                    `Dealer total ${dealerTotal}.`
+                ], () => {
+                    setTimeout(() => this.dealerDrawCards(), 1000);
+                });
+            }
+            
+            dealerDrawCards() {
+                let dealerTotal = this.calculateHandValue(this.dealerHand);
+                
+                if (dealerTotal < 17) {
+                    const newCard = this.drawCard();
+                    this.dealerHand.push(newCard);
+                    dealerTotal = this.calculateHandValue(this.dealerHand);
+                    
+                    this.speakSequence([
+                        `Dealer draws ${this.cardToString(newCard)}.`,
+                        `Dealer total ${dealerTotal}.`
+                    ], () => {
+                        setTimeout(() => this.dealerDrawCards(), 1000);
+                    });
+                } else {
+                    setTimeout(() => this.determineWinner(), 500);
+                }
+            }
+            
+            determineWinner() {
+                const playerTotal = this.calculateHandValue(this.playerHand);
+                const dealerTotal = this.calculateHandValue(this.dealerHand);
+                
+                let playerWon = false;
+                let message = '';
+                
+                if (dealerTotal > 21) {
+                    message = "Dealer busts! You win!";
+                    playerWon = true;
+                } else if (playerTotal > dealerTotal) {
+                    message = `You win! ${playerTotal} beats ${dealerTotal}.`;
+                    playerWon = true;
+                } else if (dealerTotal > playerTotal) {
+                    message = `Dealer wins. ${dealerTotal} beats ${playerTotal}.`;
+                } else {
+                    message = `Push! Both have ${playerTotal}.`;
+                    playerWon = 'push';
+                }
+                
+                this.forceSpeak(message, () => {
+                    setTimeout(() => this.endGame(playerWon), 1000);
+                });
+            }
+            
+            endGame(playerWon) {
+                let winMessage = '';
+                
+                if (playerWon === true) {
+                    if (this.playerHand.length === 2 && this.calculateHandValue(this.playerHand) === 21) {
+                        const winnings = Math.floor(this.currentBet * 1.5);
+                        this.playerChips += this.currentBet + winnings;
+                        winMessage = `Blackjack pays ${winnings} bonus!`;
+                    } else {
+                        this.playerChips += this.currentBet * 2;
+                        winMessage = `You win ${this.currentBet} chips!`;
+                    }
+                } else if (playerWon === 'push') {
+                    this.playerChips += this.currentBet;
+                    winMessage = "Push. Bet returned.";
+                }
+                
+                this.gamePhase = 'finished';
+                
+                const endMessages = [];
+                if (winMessage) endMessages.push(winMessage);
+                
+                if (this.playerChips <= 0) {
+                    endMessages.push("No chips left! Starting fresh with 100.");
+                    this.playerChips = 100;
+                } else {
+                    endMessages.push(`You have ${this.playerChips} chips.`);
+                }
+                endMessages.push("Say new game to play again.");
+                
+                this.speakSequence(endMessages);
+            }
+            
+            startNewHand() {
+                this.gamePhase = 'betting';
+                this.currentBet = 0;
+                this.playerHand = [];
+                this.dealerHand = [];
+                this.createAndShuffleDeck();
+                
+                this.forceSpeak(`You have ${this.playerChips} chips. Place your bet.`);
+            }
+            
+            announcePlayerScore() {
+                const total = this.calculateHandValue(this.playerHand);
+                const cards = this.playerHand.map(card => this.cardToString(card));
+                
+                const messages = ["Your cards:"];
+                cards.forEach(card => messages.push(card));
+                messages.push(`Total ${total}.`);
+                
+                this.speakSequence(messages);
+            }
+            
+            announceDealerCard() {
+                if (this.dealerHand.length > 0) {
+                    this.forceSpeak(`Dealer shows ${this.cardToString(this.dealerHand[0])}.`);
+                }
+            }
+            
+            createAndShuffleDeck() {
+                const suits = ['hearts', 'diamonds', 'clubs', 'spades'];
+                const ranks = ['ace', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'jack', 'queen', 'king'];
+                
+                this.deck = [];
+                for (let suit of suits) {
+                    for (let rank of ranks) {
+                        this.deck.push({ rank, suit });
+                    }
+                }
+                
+                for (let i = this.deck.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [this.deck[i], this.deck[j]] = [this.deck[j], this.deck[i]];
+                }
+            }
+            
+            drawCard() {
+                if (this.deck.length < 10) {
+                    this.createAndShuffleDeck();
+                }
+                return this.deck.pop();
+            }
+            
+            calculateHandValue(hand) {
+                let value = 0;
+                let aces = 0;
+                
+                for (let card of hand) {
+                    if (card.rank === 'ace') {
+                        aces++;
+                        value += 11;
+                    } else if (['jack', 'queen', 'king'].includes(card.rank)) {
+                        value += 10;
+                    } else {
+                        value += parseInt(card.rank);
+                    }
+                }
+                
+                while (value > 21 && aces > 0) {
+                    value -= 10;
+                    aces--;
+                }
+                
+                return value;
+            }
+            
+            cardToString(card) {
+                return `${card.rank} of ${card.suit}`;
+            }
+        }
+        
+        window.addEventListener('load', () => {
+            new VoiceBlackjackGame();
+        });
+    </script>
+    <script src="script.js"></script>
+</body>
+</html>

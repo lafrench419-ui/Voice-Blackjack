@@ -1,31 +1,22 @@
-window.addEventListener('load', () => {
-  setTimeout(() => {
-    forceSpeak("Hi gorgeous! Ready to lose those chips?");
-  }, 500); // Delay ensures browser is ready
-
-  new VoiceBlackjackGame(); // Start the game
-});
-
-// Modular voice function
+// Modular voice function with speed tuning and voice load check
 function forceSpeak(text, callback = null) {
-  try {
-    if (typeof SpeechSynthesisUtterance === 'undefined') {
-      console.warn("Speech synthesis not supported.");
-      return;
-    }
+  speechSynthesis.cancel();
 
+  const speakNow = () => {
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'en-US';
-    utterance.rate = 1.2;    // Slightly faster
+    utterance.rate = 1.4; // Snappier delivery
     utterance.pitch = 1.0;
     utterance.volume = 1.0;
+    utterance.lang = 'en-US';
 
     if (callback) utterance.onend = callback;
-
-    speechSynthesis.cancel();
     speechSynthesis.speak(utterance);
-  } catch (error) {
-    console.error("Speech error:", error);
+  };
+
+  if (speechSynthesis.getVoices().length === 0) {
+    speechSynthesis.onvoiceschanged = speakNow;
+  } else {
+    speakNow();
   }
 }
 
@@ -69,6 +60,7 @@ if (recognition) {
 }
 
 let firstInteractionDone = false;
+let greeted = false;
 
 // Voice command mapping
 function handleVoiceCommand(transcript) {
@@ -105,9 +97,13 @@ if (recognition) {
   recognition.onerror = (e) => { console.warn('Recognition error:', e); recognition.start(); };
 }
 
-// Unlock audio and start listening
+// Unlock audio and start listening + greet on first tap
 document.addEventListener('click', () => {
   if (!firstInteractionDone) {
+    if (!greeted) {
+      forceSpeak("Hi gorgeous! Ready to lose those chips?");
+      greeted = true;
+    }
     speak("Welcome to Voice Blackjack. Say 'start' to begin.");
     firstInteractionDone = true;
   }
